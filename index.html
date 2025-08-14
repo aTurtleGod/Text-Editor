@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#1b1d22" />
+<link rel="manifest" href="manifest.json" />
+<title>Shellix Editor</title>
+<style>
+  :root{
+    --bg:#1b1d22;
+    --panel:#23262d;
+    --panel-2:#2b2f37;
+    --text:#e6e8eb;
+    --muted:#9aa3ad;
+    --accent:#4ea1ff;
+    --border:#3a3f48;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+  .menubar{display:flex;gap:12px;background:var(--panel);border-bottom:1px solid var(--border);padding:8px 10px;align-items:center;position:sticky;top:0;z-index:2}
+  .menu>button{background:transparent;border:0;color:var(--text);cursor:pointer;padding:8px 10px;border-radius:10px}
+  .menu>button:active{scale:.98}
+  .menu>button:hover{background:var(--panel-2)}
+  .right{margin-left:auto;color:var(--muted);font-size:12px}
+  #tabs{display:flex;gap:6px;border-bottom:1px solid var(--border);background:var(--panel);padding:6px;overflow:auto;scrollbar-width:thin}
+  .tab{display:flex;align-items:center;gap:8px;background:var(--panel-2);padding:8px 12px;border-radius:10px;cursor:pointer;border:1px solid transparent;flex:0 0 auto}
+  .tab.active{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent),transparent 70%) inset}
+  .tab .x{opacity:.7;cursor:pointer;user-select:none}
+  .tab .x:hover{opacity:1}
+  .tab .dot{width:10px;height:10px;border-radius:50%}
+  .unsaved{background:#ffd166}
+  .saved{background:#06d6a0}
+  #workspace{position:fixed;inset:100px 0 0 0;display:flex}
+  #paneA,#paneB{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+  #splitHandle{width:8px;background:var(--border);cursor:col-resize}
+  .toolbar{display:flex;gap:8px;background:var(--panel);border-bottom:1px solid var(--border);padding:8px;align-items:center}
+  .toolbar select,.toolbar button{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:10px}
+  textarea.code{flex:1;width:100%;border:0;outline:0;background:#0f1116;color:var(--text);font:15px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;resize:none;padding:14px}
+  iframe.preview{flex:1;border:0;background:white}
+  .json-tree{flex:1;overflow:auto;padding:10px}
+  .json-row{display:flex;align-items:center;gap:6px;padding:4px 6px;border-left:2px solid transparent}
+  .json-row:hover{background:rgba(255,255,255,.04)}
+  .json-key{color:#ffd166}
+  .json-type{color:var(--muted);font-size:12px}
+  .json-expand{background:transparent;color:var(--muted);border:0;cursor:pointer}
+  .json-input{flex:1;min-width:120px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:10px}
+  .json-btn{background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:10px;cursor:pointer}
+  .hint{color:var(--muted);font-size:12px;margin-left:8px}
+  /* Mobile tweaks */
+  @media (max-width: 800px){
+    #workspace{inset:120px 0 0 0}
+    .menubar{flex-wrap:wrap;gap:6px}
+    .toolbar select,.toolbar button{padding:6px}
+    textarea.code{font-size:16px; /* mobile-friendly size */}
+    #splitHandle, #paneB{display:none !important}
+  }
+</style>
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+
+<div class="menubar">
+  <div class="menu">
+    <button id="fileOpen">File ▸ Open</button>
+    <button id="fileOpenFolder">File ▸ Open Folder</button>
+    <button id="fileSave">File ▸ Save</button>
+  </div>
+  <div class="menu">
+    <button id="toolsJson">Tools ▸ JSON</button>
+    <button id="toolsPreview">Tools ▸ Preview</button>
+  </div>
+  <div class="menu">
+    <button id="viewSplit">View ▸ Split</button>
+    <select id="splitPick" title="Choose tab for split" style="display:none"></select>
+  </div>
+  <div class="right">
+    Dark theme • Light build at <code>/light</code>
+  </div>
+</div>
+
+<div id="tabs"></div>
+
+<div id="workspace" aria-label="editor workspace">
+  <div id="paneA">
+    <div class="toolbar">
+      <span id="titleA" class="hint">(no tab)</span>
+      <span class="hint">Mode:</span>
+      <select id="modeA">
+        <option value="editor">Text</option>
+        <option value="json">JSON</option>
+        <option value="preview">Preview</option>
+      </select>
+    </div>
+    <textarea id="editorA" class="code" spellcheck="false"></textarea>
+    <div id="jsonA" class="json-tree" hidden></div>
+    <iframe id="previewA" class="preview" hidden sandbox="allow-scripts allow-forms"></iframe>
+  </div>
+  <div id="splitHandle" hidden></div>
+  <div id="paneB" hidden>
+    <div class="toolbar">
+      <span id="titleB" class="hint">(no tab)</span>
+      <span class="hint">Mode:</span>
+      <select id="modeB">
+        <option value="editor">Text</option>
+        <option value="json">JSON</option>
+        <option value="preview">Preview</option>
+      </select>
+    </div>
+    <textarea id="editorB" class="code" spellcheck="false"></textarea>
+    <div id="jsonB" class="json-tree" hidden></div>
+    <iframe id="previewB" class="preview" hidden sandbox="allow-scripts allow-forms"></iframe>
+  </div>
+</div>
+
+<script>
+const ACCEPTED_EXTS = ['.txt','.html','.js','.json','.c','.cpp','.css','.ts','.php','.ps1','.sh'];
+let tabs = JSON.parse(localStorage.getItem('pwaEditorTabs')||'[]');
+let activeTabId = localStorage.getItem('pwaEditorActiveTab') || null;
+let splitRightTabId = localStorage.getItem('pwaEditorSplitRight') || null;
+let isSplit = localStorage.getItem('pwaEditorIsSplit')==='1';
+
+function persist(){
+  const slim = tabs.map(({id,name,content,saved})=>({id,name,content,saved}));
+  localStorage.setItem('pwaEditorTabs', JSON.stringify(slim));
+  localStorage.setItem('pwaEditorActiveTab', activeTabId || '');
+  localStorage.setItem('pwaEditorSplitRight', splitRightTabId || '');
+  localStorage.setItem('pwaEditorIsSplit', isSplit ? '1' : '0');
+}
+const tabsEl = document.getElementById('tabs');
+function renderTabs(){
+  tabsEl.innerHTML='';
+  tabs.forEach(t=>{
+    const el=document.createElement('div');
+    el.className='tab'+(t.id===activeTabId?' active':'');
+    const dot=document.createElement('div'); dot.className='dot '+(t.saved?'saved':'unsaved'); el.appendChild(dot);
+    const name=document.createElement('div'); name.textContent=t.name; el.appendChild(name);
+    const x=document.createElement('div'); x.textContent='✕'; x.className='x';
+    x.onclick=(e)=>{e.stopPropagation(); closeTab(t.id);};
+    el.appendChild(x);
+    el.onclick=()=>{activeTabId=t.id; updatePanes(); persist();};
+    tabsEl.appendChild(el);
+  });
+  const pick = document.getElementById('splitPick');
+  pick.innerHTML = '<option value="">(choose right tab)</option>' + tabs.map(t=>`<option value="${t.id}" ${t.id===splitRightTabId?'selected':''}>${t.name}</option>`).join('');
+}
+function newTabFromFileHandle(fileHandle, text){
+  const id = crypto.randomUUID();
+  tabs.push({id, name:fileHandle.name, handle:fileHandle, content:text, saved:true});
+  activeTabId = id;
+  renderTabs(); updatePanes(); persist();
+}
+function newUntitled(name='untitled.txt', content=''){
+  const id = crypto.randomUUID();
+  tabs.push({id, name, handle:null, content, saved:false});
+  activeTabId = id;
+  renderTabs(); updatePanes(); persist();
+}
+function closeTab(id){
+  const idx = tabs.findIndex(t=>t.id===id);
+  if(idx<0) return;
+  tabs.splice(idx,1);
+  if(activeTabId===id) activeTabId = tabs[idx]?.id || tabs[idx-1]?.id || null;
+  if(splitRightTabId===id) splitRightTabId=null;
+  renderTabs(); updatePanes(); persist();
+}
+const paneA = { title:document.getElementById('titleA'), editor:document.getElementById('editorA'), json:document.getElementById('jsonA'), iframe:document.getElementById('previewA'), modeSel:document.getElementById('modeA') };
+const paneB = { title:document.getElementById('titleB'), editor:document.getElementById('editorB'), json:document.getElementById('jsonB'), iframe:document.getElementById('previewB'), modeSel:document.getElementById('modeB') };
+paneA.modeSel.onchange = ()=>{ setViewMode('A', paneA.modeSel.value); };
+paneB.modeSel.onchange = ()=>{ setViewMode('B', paneB.modeSel.value); };
+function setViewMode(which, mode){
+  const t = which==='A'? getTab(activeTabId) : getTab(splitRightTabId);
+  if(!t) return;
+  if(mode==='json' && !t.name.toLowerCase().endsWith('.json')) mode='editor';
+  (which==='A'?paneA:paneB).modeSel.value=mode;
+  renderPane(which);
+}
+function getTab(id){ return tabs.find(t=>t.id===id) || null; }
+function updatePanes(){
+  const paneBEl = document.getElementById('paneB');
+  const handleEl = document.getElementById('splitHandle');
+  paneBEl.hidden = !isSplit; handleEl.hidden = !isSplit;
+  renderTabs();
+  renderPane('A');
+  if(isSplit) renderPane('B');
+}
+function renderPane(which){
+  const pane = which==='A'?paneA:paneB;
+  const id   = which==='A'?activeTabId:splitRightTabId;
+  const t    = getTab(id);
+  pane.title.textContent = t ? t.name : '(no tab)';
+  pane.editor.hidden = pane.json.hidden = pane.iframe.hidden = true;
+  if(!t){ return; }
+  const mode = pane.modeSel.value;
+  if(mode==='editor'){
+    pane.editor.value = t.content;
+    pane.editor.hidden = false;
+  }else if(mode==='json' && t.name.toLowerCase().endsWith('.json')){
+    pane.json.hidden = false;
+    renderJsonTree(pane.json, t);
+  }else if(mode==='preview'){
+    pane.iframe.hidden = false;
+    renderPreview(pane.iframe, t);
+  }
+}
+paneA.editor.addEventListener('input', ()=>{ onEdit('A'); });
+paneB.editor.addEventListener('input', ()=>{ onEdit('B'); });
+function onEdit(which){
+  const id = which==='A'? activeTabId : splitRightTabId;
+  const t = getTab(id); if(!t) return;
+  const pane = which==='A'? paneA : paneB;
+  t.content = pane.editor.value;
+  t.saved = false;
+  renderTabs(); persist();
+}
+async function pickOpen(){
+  try{
+    const [handle] = await window.showOpenFilePicker({ types:[{accept:{'text/plain':ACCEPTED_EXTS}}] });
+    const file = await handle.getFile(); const text = await file.text();
+    newTabFromFileHandle(handle,text);
+  }catch(e){}
+}
+async function pickSave(){
+  const t = getTab(activeTabId); if(!t) return;
+  if(!t.handle){
+    t.handle = await window.showSaveFilePicker({
+      suggestedName: t.name,
+      types:[{accept:{'text/plain':ACCEPTED_EXTS}}]
+    });
+    try{ t.name = (await t.handle.getFile()).name; }catch(e){}
+  }
+  const w = await t.handle.createWritable();
+  await w.write(t.content); await w.close();
+  t.saved = true; renderTabs(); persist();
+}
+async function pickFolder(){
+  try{
+    const dir = await window.showDirectoryPicker();
+    for await (const [name,handle] of dir.entries()) console.log('[Folder]', name, handle.kind);
+    alert('Folder opened. See console.');
+  }catch(e){}
+}
+document.getElementById('fileOpen').onclick = pickOpen;
+document.getElementById('fileSave').onclick = pickSave;
+document.getElementById('fileOpenFolder').onclick = pickFolder;
+document.getElementById('toolsJson').onclick = ()=>{
+  const t = getTab(activeTabId); if(!t) return;
+  paneA.modeSel.value = t.name.toLowerCase().endsWith('.json') ? 'json' : 'editor';
+  renderPane('A');
+};
+document.getElementById('toolsPreview').onclick = ()=>{
+  const t = getTab(activeTabId); if(!t) return;
+  const pvName = `Preview: ${t.name}`;
+  let pv = tabs.find(x=>x.name===pvName);
+  const html = generatePreviewHTML(t.content);
+  if(!pv){ pv = {id:crypto.randomUUID(), name:pvName, handle:null, content:html, saved:false}; tabs.push(pv); }
+  else { pv.content = html; pv.saved=false; }
+  activeTabId = pv.id; renderTabs(); updatePanes(); persist();
+};
+const splitBtn = document.getElementById('viewSplit');
+const splitPick = document.getElementById('splitPick');
+splitBtn.onclick = ()=>{
+  isSplit = !isSplit;
+  splitPick.style.display = isSplit ? '' : 'none';
+  updatePanes(); persist();
+};
+splitPick.onchange = ()=>{
+  splitRightTabId = splitPick.value || null;
+  updatePanes(); persist();
+};
+const handle = document.getElementById('splitHandle');
+let drag=false;
+handle.addEventListener('mousedown',()=>drag=true);
+addEventListener('mouseup',()=>drag=false);
+addEventListener('mousemove',(e)=>{
+  if(!drag) return;
+  const w = window.innerWidth;
+  const left = Math.min(Math.max(200, e.clientX), w-200);
+  document.getElementById('paneA').style.flex = `0 0 ${left}px`;
+  document.getElementById('paneB').style.flex = `1`;
+});
+function renderJsonTree(container, tab){
+  container.innerHTML='';
+  let data;
+  try{ data = JSON.parse(tab.content||'null'); }
+  catch(e){ container.innerHTML = `<div class="hint">Invalid JSON. Fix in Text mode.</div>`; return; }
+  function row(key, value, path, depth){
+    const row = document.createElement('div');
+    row.className='json-row';
+    row.style.paddingLeft = (depth*14)+'px';
+    const exp = document.createElement('button'); exp.className='json-expand';
+    const isObj = value && typeof value==='object';
+    exp.textContent = isObj ? '▸' : '•';
+    let open=false;
+    if(isObj){
+      exp.onclick=()=>{ open=!open; exp.textContent=open?'▾':'▸'; kids.style.display=open?'block':'none'; };
+    } else {
+      exp.disabled=true;
+    }
+    const k = document.createElement('span'); k.className='json-key'; k.textContent = key;
+    const t = document.createElement('span'); t.className='json-type'; t.textContent = ' : ' + (Array.isArray(value)?'array':'object'===typeof value?'object':typeof value);
+    const wrap=document.createElement('div');
+    wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='6px';
+    wrap.append(exp,k,t);
+    const actions=document.createElement('div'); actions.style.marginLeft='auto'; actions.style.display='flex'; actions.style.gap='6px';
+    if(!isObj){
+      const input=document.createElement('input'); input.className='json-input';
+      input.value = typeof value==='string' ? value : JSON.stringify(value);
+      input.onchange=()=>{ setAt(path, tryAutoType(input.value)); };
+      actions.append(input);
+      const delBtn=document.createElement('button'); delBtn.className='json-btn'; delBtn.textContent='Delete';
+      delBtn.onclick=()=>{ delAt(path); };
+      actions.append(delBtn);
+    }else{
+      const addBtn=document.createElement('button'); addBtn.className='json-btn'; addBtn.textContent = Array.isArray(value)?'+ Item':'+ Key';
+      addBtn.onclick=()=>{
+        if(Array.isArray(value)){
+          const v = prompt('New array item (JSON or raw string):','');
+          if(v===null) return;
+          const parsed = tryAutoType(v);
+          const arr = getAt(path);
+          arr.push(parsed);
+          updateTabFromJson();
+        }else{
+          const keyName = prompt('New key name:','key');
+          if(!keyName) return;
+          const val = prompt('Value (JSON or raw string):','');
+          const parsed = tryAutoType(val);
+          const obj = getAt(path);
+          obj[keyName] = parsed;
+          updateTabFromJson();
+        }
+      };
+      actions.append(addBtn);
+      const delBtn=document.createElement('button'); delBtn.className='json-btn'; delBtn.textContent='Delete';
+      delBtn.onclick=()=>{ delAt(path); };
+      actions.append(delBtn);
+    }
+    row.append(wrap,actions);
+    const kids=document.createElement('div'); kids.style.display='none';
+    if(isObj){
+      if(Array.isArray(value)){
+        value.forEach((v,i)=> kids.append(row(`[${i}]`, v, path.concat(i), depth+1)));
+      }else{
+        Object.keys(value).forEach(k2=> kids.append(row(k2, value[k2], path.concat(k2), depth+1)));
+      }
+    }
+    const frag=document.createDocumentFragment();
+    frag.append(row, kids);
+    return frag;
+  }
+  container.append(row('(root)', data, [], 0));
+  function setAt(path, v){
+    if(path.length===0){ data = v; updateTabFromJson(); return; }
+    const parent = getAt(path.slice(0,-1));
+    parent[path[path.length-1]] = v;
+    updateTabFromJson();
+  }
+  function delAt(path){
+    if(path.length===0){ data = null; updateTabFromJson(); return; }
+    const parent = getAt(path.slice(0,-1));
+    const key = path[path.length-1];
+    if(Array.isArray(parent)) parent.splice(key,1);
+    else delete parent[key];
+    updateTabFromJson();
+  }
+  function getAt(path){
+    let cur = data;
+    for(const p of path) cur = cur[p];
+    return cur;
+  }
+  function updateTabFromJson(){
+    tab.content = JSON.stringify(data, null, 2);
+    tab.saved = false;
+    persist();
+    renderTabs();
+    renderJsonTree(container, tab);
+  }
+}
+function tryAutoType(val){
+  try{ return JSON.parse(val); }catch{}
+  if(val==='true') return true;
+  if(val==='false') return false;
+  if(val==='null') return null;
+  if(!isNaN(Number(val))) return Number(val);
+  return val;
+}
+function generatePreviewHTML(htmlContent){
+  try{
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, 'text/html');
+    doc.querySelectorAll('link[rel="stylesheet"][href]').forEach(link=>{
+      const href = link.getAttribute('href');
+      const match = tabs.find(t=>t.name===href);
+      if(match){
+        const style = doc.createElement('style');
+        style.textContent = match.content;
+        link.replaceWith(style);
+      }
+    });
+    doc.querySelectorAll('script[src]').forEach(s=>{
+      const src = s.getAttribute('src');
+      const match = tabs.find(t=>t.name===src);
+      if(match){
+        const inline = doc.createElement('script');
+        inline.textContent = match.content;
+        s.replaceWith(inline);
+      }
+    });
+    return '<!DOCTYPE html>\n'+doc.documentElement.outerHTML;
+  }catch(e){
+    return `<!DOCTYPE html><html><body><pre>Preview error:\n${String(e)}</pre></body></html>`;
+  }
+}
+function renderPreview(iframe, tab){
+  const html = tab.name.toLowerCase().endsWith('.html') ? generatePreviewHTML(tab.content) : `<!DOCTYPE html><html><body><pre>Open an HTML tab then Tools ▸ Preview</pre></body></html>`;
+  const blob = new Blob([html], {type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  iframe.src = url;
+  iframe.onload = ()=> URL.revokeObjectURL(url);
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+}
+if('launchQueue' in window){
+  launchQueue.setConsumer(async (params)=>{
+    for (const h of params.files || []) {
+      const f = await h.getFile();
+      const t = await f.text();
+      newTabFromFileHandle(h, t);
+    }
+  });
+}
+renderTabs();
+if(!activeTabId && tabs.length) activeTabId = tabs[0].id;
+updatePanes();
+if(!tabs.length){ newUntitled('index.html', `<!doctype html>
+<html><head>
+<meta charset="utf-8"/>
+<title>Hello, turtle 🐢</title>
+<link rel="stylesheet" href="style.css">
+</head><body>
+<h1>Hello Shellix Editor</h1>
+<p>Edit me, then Tools ▸ Preview.</p>
+<script src="app.js"></script>
+</body></html>`); }
+</script>
+</body>
+</html>
